@@ -1,0 +1,156 @@
+#include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#define MAX_RING 6
+
+typedef struct {
+  int id;
+  void *data;
+} handle;
+
+typedef struct {
+  handle *handlers[MAX_RING];
+
+  int req_prod, req_cons, res_prod, res_cons;
+  pthread_mutex_t lock_req, lock_res;
+} ring;
+
+typedef struct {
+  int arg1, arg2;
+  char op;
+  int result;
+} computation;
+
+void *client(void *arg);
+void *server(void *arg);
+
+ring *ring_create() {
+  ring *r = malloc(sizeof(ring));
+  r->req_prod = 0;
+  r->req_cons = 0;
+
+  r->res_prod = MAX_RING / 2;
+  r->res_cons = MAX_RING / 2;
+
+  pthread_mutex_init(&r->lock_req, NULL);
+  pthread_mutex_init(&r->lock_res, NULL);
+
+  return r;
+}
+
+int main(int argc, char **argv) {
+  ring *r = ring_create();
+
+  pthread_t client_t, server_t;
+
+  pthread_create(&server_t, NULL, server, r);
+  pthread_create(&client_t, NULL, client, r);
+
+  pthread_join(server_t, NULL);
+  pthread_join(client_t, NULL);
+
+  free(r);
+
+  return 0;
+}
+
+void *server(void *arg) {
+  ring *r = arg;
+  computation *c;
+  int id = 0;
+  int requests = 10;
+  int responses = 10;
+
+  for(;;) {
+    /* if (!(requests + responses)) { */
+    /*   return NULL; */
+    /* } */
+
+    // try to consume requests
+    if (/* requests &&  */
+        !id && (r->req_prod != r->req_cons)) { // request is available! seg
+      handle *h = r->handlers[r->req_cons];
+      c = h->data;
+
+      fprintf(stderr, "Processing request #%d from slot %d.\n", h->id, r->req_cons);
+
+      sleep(rand() % 2);
+
+      switch(c->op) {
+      case '+':
+        c->result = c->arg1 + c->arg2;
+        break;
+      }
+
+      id = h->id;
+      free(h);
+      r->req_cons = (r->req_cons + 1) % MAX_RING;
+      requests--;
+    }
+
+    // try to produce responses
+    if (/* responses && */
+        id && (r->res_prod != r->req_cons)) {
+      handle *h = malloc(sizeof(handle));
+      h->id = id;
+      h->data = c;
+
+      r->handlers[r->res_prod] = h;
+      fprintf(stderr, "Produced response to #%d to slot %d.\n", h->id, r->res_prod);
+      r->res_prod = (r->res_prod + 1) % MAX_RING;
+      id = 0;
+      responses--;
+    }
+  }
+}
+
+void *client(void *arg) {
+  ring *r = arg;
+  int requests = 10;
+  int responses = 10;
+
+  for (;;) {
+    /* if (!(requests + responses)) { */
+    /*   return NULL; */
+    /* } */
+    // try to produce a request
+    if (/* requests && */
+        r->req_prod != r->res_cons) { // room for a req!
+      sleep(rand() % 3);
+      computation *c = malloc(sizeof(computation));
+      c->op = '+';
+      c->arg1 = rand();
+      c->arg2 = rand();
+
+      handle *h = malloc(sizeof(handle));
+      h->data = c;
+      h->id = rand(); // TODO monotonically increasing id generator
+
+      /* pthread_mutex_lock(&r->lock_req); */
+      r->handlers[r->req_prod] = h;
+      fprintf(stderr, "Produced req #%d: %d %c %d = ? into slot %d\n",
+              h->id, c->arg1, c->op, c->arg2, r->req_prod);
+      r->req_prod = (r->req_prod + 1) % MAX_RING;
+      requests--;
+      /* pthread_mutex_unlock(&r->lock_req); */
+    }
+
+    // try to consume response
+    //pthread_mutex_lock(&r->lock_res);
+    if (/* responses && */
+        r->res_prod != r->res_cons) { // response is available!
+      handle *h = r->handlers[r->res_cons];
+      computation *c = h->data;
+      fprintf(stdout, "Got response! #%d: %d %c %d = %d from slot %d\n",
+              h->id, c->arg1, c->op, c->arg2, c->result, r->res_cons);
+      free(c);
+      free(h);
+      r->res_cons = (r->res_cons + 1) % MAX_RING;
+      responses--;
+    }
+  }
+}

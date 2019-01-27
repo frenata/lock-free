@@ -1,11 +1,10 @@
-#include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <string.h>
 
-#define MAX_RING 6
+#define MAX_RING 60
 
 typedef struct {
   int id;
@@ -14,9 +13,8 @@ typedef struct {
 
 typedef struct {
   handle *handlers[MAX_RING];
-
+  int slots;
   int req_prod, req_cons, res_prod, res_cons;
-  pthread_mutex_t lock_req, lock_res;
 } ring;
 
 typedef struct {
@@ -28,22 +26,27 @@ typedef struct {
 void *client(void *arg);
 void *server(void *arg);
 
-ring *ring_create() {
+ring *ring_create(int slots) {
   ring *r = malloc(sizeof(ring));
   r->req_prod = 0;
   r->req_cons = 0;
 
-  r->res_prod = MAX_RING / 2;
-  r->res_cons = MAX_RING / 2;
-
-  pthread_mutex_init(&r->lock_req, NULL);
-  pthread_mutex_init(&r->lock_res, NULL);
+  r->res_prod = slots / 2;
+  r->res_cons = slots / 2;
+  r->slots = slots;
 
   return r;
 }
 
 int main(int argc, char **argv) {
-  ring *r = ring_create();
+  int slots = MAX_RING;
+  if (argc > 1) {
+    slots = atoi(argv[1]);
+    slots = slots > MAX_RING ? MAX_RING : slots;
+  }
+  printf("ring with %d slots\n", slots);
+
+  ring *r = ring_create(slots);
 
   pthread_t client_t, server_t;
 
@@ -78,7 +81,7 @@ void *server(void *arg) {
 
       fprintf(stderr, "Processing request #%d from slot %d.\n", h->id, r->req_cons);
 
-      sleep(rand() % 2);
+      sleep(rand() % 4);
 
       switch(c->op) {
       case '+':
@@ -88,7 +91,7 @@ void *server(void *arg) {
 
       id = h->id;
       free(h);
-      r->req_cons = (r->req_cons + 1) % MAX_RING;
+      r->req_cons = (r->req_cons + 1) % r->slots;
       requests--;
     }
 
@@ -101,7 +104,7 @@ void *server(void *arg) {
 
       r->handlers[r->res_prod] = h;
       fprintf(stderr, "Produced response to #%d to slot %d.\n", h->id, r->res_prod);
-      r->res_prod = (r->res_prod + 1) % MAX_RING;
+      r->res_prod = (r->res_prod + 1) % r->slots;
       id = 0;
       responses--;
     }
@@ -120,7 +123,7 @@ void *client(void *arg) {
     // try to produce a request
     if (/* requests && */
         r->req_prod != r->res_cons) { // room for a req!
-      sleep(rand() % 3);
+      sleep(rand() % 4);
       computation *c = malloc(sizeof(computation));
       c->op = '+';
       c->arg1 = rand();
@@ -130,17 +133,14 @@ void *client(void *arg) {
       h->data = c;
       h->id = rand(); // TODO monotonically increasing id generator
 
-      /* pthread_mutex_lock(&r->lock_req); */
       r->handlers[r->req_prod] = h;
       fprintf(stderr, "Produced req #%d: %d %c %d = ? into slot %d\n",
               h->id, c->arg1, c->op, c->arg2, r->req_prod);
-      r->req_prod = (r->req_prod + 1) % MAX_RING;
+      r->req_prod = (r->req_prod + 1) % r->slots;
       requests--;
-      /* pthread_mutex_unlock(&r->lock_req); */
     }
 
     // try to consume response
-    //pthread_mutex_lock(&r->lock_res);
     if (/* responses && */
         r->res_prod != r->res_cons) { // response is available!
       handle *h = r->handlers[r->res_cons];
@@ -149,7 +149,7 @@ void *client(void *arg) {
               h->id, c->arg1, c->op, c->arg2, c->result, r->res_cons);
       free(c);
       free(h);
-      r->res_cons = (r->res_cons + 1) % MAX_RING;
+      r->res_cons = (r->res_cons + 1) % r->slots;
       responses--;
     }
   }

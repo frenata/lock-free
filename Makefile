@@ -1,5 +1,6 @@
-CC = gcc            # default is CC = cc
-CFLAGS = -g -Wall   # default is CFLAGS = [blank]
+# default is CC = cc
+CC = gcc
+CFLAGS = -g -Wall -fsanitize=address -O1 -fno-omit-frame-pointer
 CPPFLAGS =          # default is CPPFLAGS = [blank]
 LDFLAGS = -lpthread # default is LDFLAGS = [blank]
 

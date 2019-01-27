@@ -31,8 +31,9 @@ ring *ring_create(int slots) {
   r->req_prod = 0;
   r->req_cons = 0;
 
-  r->res_prod = slots / 2;
-  r->res_cons = slots / 2;
+  int mid = slots / 2;
+  r->res_prod = mid;
+  r->res_cons = mid;
   r->slots = slots;
 
   return r;
